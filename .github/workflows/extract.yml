@@ -1,0 +1,53 @@
+name: Daily PDF Extraction
+
+on:
+  # Run daily at 8:00 AM UTC (adjust time as needed)
+  schedule:
+    - cron: '0 8 * * *'
+
+  # Allow manual trigger from GitHub Actions tab
+  workflow_dispatch:
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Download PDFs from OneDrive
+        env:
+          ONEDRIVE_FOLDER_URL: ${{ secrets.ONEDRIVE_FOLDER_URL }}
+        run: |
+          python scripts/download_from_onedrive.py
+
+      - name: Run extraction agent
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          python scoping_review_agent.py
+
+      - name: Upload results to Google Cloud
+        env:
+          GOOGLE_CLOUD_CREDENTIALS: ${{ secrets.GOOGLE_CLOUD_CREDENTIALS }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+        run: |
+          python scripts/upload_to_google_cloud.py
+
+      - name: Log execution
+        if: always()
+        run: |
+          echo "Extraction completed at $(date)"
+          if [ -f extraction_agent.log ]; then
+            tail -20 extraction_agent.log
+          fi

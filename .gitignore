@@ -1,0 +1,40 @@
+# Local data - not versioned
+Academic Papers/
+Data Extraction Form_1.xlsx
+processed_files.json
+extraction_agent.log
+
+# CREDENTIALS - NEVER COMMIT THESE
+*.json
+scoping-review-extraction-*.json
+credentials.json
+*-credentials.json
+*-key.json
+google-*.json
+service-account-*.json
+
+# Environment variables
+.env
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+*.xlsx~
