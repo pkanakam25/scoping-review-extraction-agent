@@ -63,7 +63,7 @@ def upload_to_google_cloud_storage(credentials):
         logger.error(f"Failed to upload to GCS: {e}")
 
 def upload_to_google_sheets(credentials):
-    """Sync extraction data to Google Sheets (recommended method)."""
+    """Append new extraction data to Google Sheets."""
     if not GOOGLE_SHEET_ID:
         logger.warning("GOOGLE_SHEET_ID not set. Skipping Google Sheets sync.")
         return
@@ -88,17 +88,38 @@ def upload_to_google_sheets(credentials):
         wb = openpyxl.load_workbook(EXCEL_FILE)
         ws = wb.active
 
-        # Prepare data (headers + rows)
-        data = []
+        # Get all rows from Excel
+        excel_data = []
         for row in ws.iter_rows(min_row=1, values_only=True):
-            data.append(list(row))
+            excel_data.append(list(row))
 
-        # Clear existing data and write new data
+        # Get existing data from Google Sheet
+        existing_data = worksheet.get_all_values()
+
         logger.info(f"Syncing data to Google Sheet (ID: {GOOGLE_SHEET_ID})")
-        worksheet.clear()
-        worksheet.update(data)
 
-        logger.info(f"✓ Successfully synced {len(data)} rows to Google Sheets")
+        # If sheet is empty, add headers
+        if not existing_data:
+            logger.info("Sheet is empty, adding all data with headers")
+            worksheet.update(excel_data)
+            logger.info(f"✓ Successfully synced {len(excel_data)} rows to Google Sheets")
+        else:
+            # Find new rows to append (skip header row which is row 1)
+            new_rows = excel_data[1:]  # Skip header
+            existing_count = len(existing_data) - 1  # Subtract header row
+
+            if len(new_rows) > existing_count:
+                # Append only new rows
+                rows_to_append = new_rows[existing_count:]
+                if rows_to_append:
+                    logger.info(f"Appending {len(rows_to_append)} new row(s)")
+                    worksheet.append_rows(rows_to_append)
+                    logger.info(f"✓ Successfully appended {len(rows_to_append)} new row(s) to Google Sheets")
+                else:
+                    logger.info("No new rows to append")
+            else:
+                logger.info("No new rows to append (already synced)")
+
     except Exception as e:
         logger.error(f"Failed to sync to Google Sheets: {e}")
 
