@@ -428,8 +428,11 @@ def write_extraction_to_excel(extracted_data: Dict[str, str], pdf_filename: str)
         # Get next serial number
         next_sno = get_next_serial_number(ws)
 
+        # Get current date and time for extraction timestamp
+        extraction_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
         # Define the mapping from extracted data keys to Excel columns
-        # New order matches user's 24-field specification (A-X)
+        # Order: A-X (24 fields) + Y (extraction date/time)
         field_mapping = {
             "s_no": ("A", str(next_sno)),
             "authors": ("B", extracted_data.get("authors", "N/A")),
@@ -455,6 +458,7 @@ def write_extraction_to_excel(extracted_data: Dict[str, str], pdf_filename: str)
             "institutional_affiliation": ("V", extracted_data.get("institutional_affiliation", "N/A")),
             "funder_funding": ("W", extracted_data.get("funder_funding", "N/A")),
             "data_accessibility": ("X", ""),  # Leave blank for manual entry
+            "extraction_date_time": ("Y", extraction_timestamp),
         }
 
         # Write data to cells
