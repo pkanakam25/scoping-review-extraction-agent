@@ -685,15 +685,61 @@ def process_single_pdf_from_drive(file_id: str, file_name: str) -> bool:
     return True
 
 
+def create_excel_file_if_not_exists() -> bool:
+    """Create Excel file with headers if it doesn't exist."""
+    if os.path.exists(EXCEL_FILE):
+        return True
+
+    try:
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Extractions"
+
+        # Define headers (A-Y: 25 columns)
+        headers = [
+            "S.No.", "Author(s)", "Country/Location", "Title of Source",
+            "Type of Publication", "Where Published", "Publication Year",
+            "Type of Evidence Source", "Aim/Purpose", "Research Questions/Hypothesis",
+            "Study Design", "Methodology and Methods", "Population and Sample Size",
+            "Setting/Context", "Date and Location of Data Collection",
+            "Definition of Coastal Areas", "Interventions/Programmes", "Outcomes",
+            "Key Findings", "Knowledge Gaps", "Barriers, Facilitators, Limitations",
+            "Institutional Affiliation", "Funder/Funding", "Data Accessibility",
+            "Date & Time of Extraction"
+        ]
+
+        # Write headers
+        for col_idx, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_idx)
+            cell.value = header
+            cell.font = openpyxl.styles.Font(bold=True, color="FFFFFF")
+            cell.fill = openpyxl.styles.PatternFill(start_color="0070C0", end_color="0070C0", fill_type="solid")
+
+        # Set column widths
+        column_widths = {
+            'A': 6, 'B': 20, 'C': 18, 'D': 25, 'E': 18, 'F': 18, 'G': 14, 'H': 18,
+            'I': 18, 'J': 22, 'K': 18, 'L': 20, 'M': 20, 'N': 18, 'O': 22,
+            'P': 18, 'Q': 20, 'R': 18, 'S': 20, 'T': 18, 'U': 25, 'V': 20, 'W': 18, 'X': 18, 'Y': 22
+        }
+        for col, width in column_widths.items():
+            ws.column_dimensions[col].width = width
+
+        wb.save(EXCEL_FILE)
+        logger.info(f"✓ Created Excel file: {EXCEL_FILE}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to create Excel file: {e}")
+        return False
+
 def run_extraction_agent() -> None:
     """Main workflow: get PDFs from Google Drive, process new ones."""
     logger.info("=" * 60)
     logger.info(f"Starting extraction agent at {datetime.now()}")
     logger.info("=" * 60)
 
-    # Verify Excel file exists
-    if not os.path.exists(EXCEL_FILE):
-        logger.error(f"Excel file not found: {EXCEL_FILE}")
+    # Create Excel file if it doesn't exist
+    if not create_excel_file_if_not_exists():
+        logger.error("Failed to create/verify Excel file")
         return
 
     # Find new PDFs from Google Drive

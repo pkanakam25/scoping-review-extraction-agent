@@ -25,16 +25,10 @@ jobs:
         run: |
           pip install -r requirements.txt
 
-      - name: Download PDFs from Google Drive
+      - name: Run extraction agent (reads directly from Google Drive)
         env:
           GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
           GOOGLE_CLOUD_CREDENTIALS: ${{ secrets.GOOGLE_CLOUD_CREDENTIALS }}
-        run: |
-          python scripts/download_from_onedrive.py
-
-      - name: Run extraction agent
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           python scoping_review_agent.py
 
