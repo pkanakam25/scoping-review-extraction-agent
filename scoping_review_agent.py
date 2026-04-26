@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Scoping Review Data Extraction Agent
-Automatically extracts data from academic PDFs and populates Excel sheet for coastal health scoping review.
+Automatically extracts data from academic PDFs in Google Drive and populates Excel sheet for coastal health scoping review.
 """
 
 import os
@@ -9,21 +9,33 @@ import json
 import logging
 import sys
 import re
+import io
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
+from dotenv import load_dotenv
 
 import pdfplumber
 from pypdf import PdfReader
 import openpyxl
 from openpyxl.utils import get_column_letter
 
+# Google Drive API imports
+from google.auth.transport.requests import Request
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
+
+# Load environment variables
+load_dotenv()
+
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
 
-# UPDATE THIS PATH: Where your PDF files are located
-PAPERS_FOLDER = "/Users/pujithakanakam/Desktop/scoping-review-extraction-agent/Academic Papers"
+# Google Drive configuration
+GOOGLE_DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
+GOOGLE_CLOUD_CREDENTIALS_JSON = os.getenv("GOOGLE_CLOUD_CREDENTIALS")
 
 # Your Excel file
 EXCEL_FILE = "Data Extraction Form_1.xlsx"
@@ -31,9 +43,6 @@ EXCEL_FILE = "Data Extraction Form_1.xlsx"
 # API and tracking
 PROCESSED_FILES_LOG = "processed_files.json"
 LOG_FILE = "extraction_agent.log"
-
-# Claude API will use ANTHROPIC_API_KEY environment variable
-# Set it before running: export ANTHROPIC_API_KEY="sk-..."
 
 # ============================================================================
 # LOGGING SETUP
@@ -71,6 +80,70 @@ COUNTRIES = {
     "Canada": ["Canada", "Canadian"],
     "New Zealand": ["New Zealand"],
 }
+
+# ============================================================================
+# GOOGLE DRIVE API FUNCTIONS
+# ============================================================================
+
+def get_drive_service():
+    """Initialize and return Google Drive API service."""
+    if not GOOGLE_CLOUD_CREDENTIALS_JSON:
+        logger.error("GOOGLE_CLOUD_CREDENTIALS not set")
+        return None
+
+    try:
+        creds_dict = json.loads(GOOGLE_CLOUD_CREDENTIALS_JSON)
+        credentials = Credentials.from_service_account_info(creds_dict)
+        service = build('drive', 'v3', credentials=credentials)
+        return service
+    except Exception as e:
+        logger.error(f"Failed to initialize Google Drive service: {e}")
+        return None
+
+def get_pdfs_from_drive() -> List[Tuple[str, str]]:
+    """Get list of PDFs from Google Drive folder. Returns list of (file_id, file_name)."""
+    if not GOOGLE_DRIVE_FOLDER_ID:
+        logger.error("GOOGLE_DRIVE_FOLDER_ID not set")
+        return []
+
+    service = get_drive_service()
+    if not service:
+        return []
+
+    try:
+        query = f"'{GOOGLE_DRIVE_FOLDER_ID}' in parents and mimeType='application/pdf' and trashed=false"
+        results = service.files().list(
+            q=query,
+            spaces='drive',
+            fields='files(id, name)',
+            pageSize=100
+        ).execute()
+
+        files = results.get('files', [])
+        return [(f['id'], f['name']) for f in files]
+    except Exception as e:
+        logger.error(f"Failed to get PDFs from Google Drive: {e}")
+        return []
+
+def download_pdf_from_drive(file_id: str) -> Optional[bytes]:
+    """Download PDF file content from Google Drive as bytes."""
+    service = get_drive_service()
+    if not service:
+        return None
+
+    try:
+        request = service.files().get_media(fileId=file_id)
+        file_content = io.BytesIO()
+        downloader = MediaIoBaseDownload(file_content, request)
+
+        done = False
+        while not done:
+            status, done = downloader.next_chunk()
+
+        return file_content.getvalue()
+    except Exception as e:
+        logger.error(f"Failed to download PDF from Google Drive: {e}")
+        return None
 
 def extract_year_from_text(text: str) -> str:
     """Extract publication year from text."""
@@ -317,8 +390,38 @@ def save_processed_files(processed: set) -> None:
         json.dump({"processed_files": sorted(list(processed))}, f, indent=2)
 
 
+def extract_text_from_pdf_bytes(pdf_bytes: bytes, filename: str = "PDF") -> Optional[str]:
+    """Extract text from PDF bytes using pdfplumber, fallback to pypdf."""
+    try:
+        # Try pdfplumber first
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            text = ""
+            for page in pdf.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    text += page_text + "\n"
+            if text.strip():
+                return text
+    except Exception as e:
+        logger.debug(f"pdfplumber failed for {filename}: {e}, trying pypdf")
+
+    # Fallback to pypdf
+    try:
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        text = ""
+        for page in reader.pages:
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text + "\n"
+        if text.strip():
+            return text
+    except Exception as e:
+        logger.error(f"Failed to extract text from {filename} using both methods: {e}")
+
+    return None
+
 def extract_text_from_pdf(pdf_path: str) -> Optional[str]:
-    """Extract text from a PDF file using pdfplumber, fallback to pypdf."""
+    """Extract text from a local PDF file using pdfplumber, fallback to pypdf."""
     try:
         # Try pdfplumber first
         with pdfplumber.open(pdf_path) as pdf:
@@ -480,7 +583,7 @@ def write_extraction_to_excel(extracted_data: Dict[str, str], pdf_filename: str)
 
 
 def find_new_pdfs() -> List[str]:
-    """Find all new PDFs in the papers folder."""
+    """Find all new PDFs in the papers folder (for backward compatibility)."""
     papers_path = Path(PAPERS_FOLDER)
 
     if not papers_path.exists():
@@ -496,9 +599,24 @@ def find_new_pdfs() -> List[str]:
 
     return new_pdfs
 
+def find_new_pdfs_from_drive() -> List[Tuple[str, str]]:
+    """Find all new PDFs from Google Drive. Returns list of (file_id, file_name)."""
+    drive_files = get_pdfs_from_drive()
+    if not drive_files:
+        logger.warning("No PDFs found in Google Drive folder")
+        return []
+
+    processed = load_processed_files()
+    new_pdfs = []
+
+    for file_id, file_name in drive_files:
+        if file_name not in processed:
+            new_pdfs.append((file_id, file_name))
+
+    return new_pdfs
 
 def process_single_pdf(pdf_path: str) -> bool:
-    """Process a single PDF file."""
+    """Process a single local PDF file (for backward compatibility)."""
     pdf_name = os.path.basename(pdf_path)
     logger.info(f"Processing: {pdf_name}")
 
@@ -529,9 +647,46 @@ def process_single_pdf(pdf_path: str) -> bool:
     logger.info(f"✓ Successfully processed {pdf_name}")
     return True
 
+def process_single_pdf_from_drive(file_id: str, file_name: str) -> bool:
+    """Process a single PDF from Google Drive without downloading."""
+    logger.info(f"Processing: {file_name}")
+
+    # Download PDF content from Google Drive
+    pdf_bytes = download_pdf_from_drive(file_id)
+    if not pdf_bytes:
+        logger.error(f"Could not download {file_name} from Google Drive")
+        return False
+
+    # Extract text from bytes
+    paper_text = extract_text_from_pdf_bytes(pdf_bytes, file_name)
+    if not paper_text:
+        logger.error(f"Could not extract text from {file_name}")
+        return False
+
+    logger.info(f"Extracted {len(paper_text)} characters from {file_name}")
+
+    # Extract data locally (no API)
+    extracted_data = extract_data_locally(paper_text, file_name)
+    if not extracted_data:
+        logger.error(f"Failed to extract data from {file_name}")
+        return False
+
+    # Write to Excel
+    if not write_extraction_to_excel(extracted_data, file_name):
+        logger.error(f"Failed to write extraction to Excel for {file_name}")
+        return False
+
+    # Mark as processed
+    processed = load_processed_files()
+    processed.add(file_name)
+    save_processed_files(processed)
+
+    logger.info(f"✓ Successfully processed {file_name}")
+    return True
+
 
 def run_extraction_agent() -> None:
-    """Main workflow: scan folder, process new PDFs."""
+    """Main workflow: get PDFs from Google Drive, process new ones."""
     logger.info("=" * 60)
     logger.info(f"Starting extraction agent at {datetime.now()}")
     logger.info("=" * 60)
@@ -541,19 +696,19 @@ def run_extraction_agent() -> None:
         logger.error(f"Excel file not found: {EXCEL_FILE}")
         return
 
-    # Find new PDFs
-    new_pdfs = find_new_pdfs()
+    # Find new PDFs from Google Drive
+    new_pdfs = find_new_pdfs_from_drive()
 
     if not new_pdfs:
-        logger.info("No new PDFs found")
+        logger.info("No new PDFs found in Google Drive")
         return
 
     logger.info(f"Found {len(new_pdfs)} new PDF(s)")
 
-    # Process each PDF
+    # Process each PDF from Google Drive
     successful = 0
-    for pdf_path in new_pdfs:
-        if process_single_pdf(pdf_path):
+    for file_id, file_name in new_pdfs:
+        if process_single_pdf_from_drive(file_id, file_name):
             successful += 1
 
     logger.info("=" * 60)
@@ -566,10 +721,4 @@ def run_extraction_agent() -> None:
 # ============================================================================
 
 if __name__ == "__main__":
-    # Check if folder path is configured
-    if PAPERS_FOLDER == "./papers" and not os.path.exists("./papers"):
-        logger.warning(f"Default papers folder '{PAPERS_FOLDER}' not found.")
-        logger.warning("Please update PAPERS_FOLDER in the script to your actual folder path.")
-        logger.warning("Example: PAPERS_FOLDER = '/Users/username/Documents/scoping_review/papers'")
-
     run_extraction_agent()
