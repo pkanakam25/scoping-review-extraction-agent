@@ -11,6 +11,10 @@ import json
 import logging
 from pathlib import Path
 import openpyxl
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Google Cloud imports
 from google.cloud import storage
@@ -69,8 +73,14 @@ def upload_to_google_sheets(credentials):
         return
 
     try:
+        # Add proper scopes for Google Sheets
+        scoped_credentials = credentials.with_scopes([
+            'https://www.googleapis.com/auth/spreadsheets',
+            'https://www.googleapis.com/auth/drive'
+        ])
+
         # Authenticate with gspread
-        gc = gspread.authorize(credentials)
+        gc = gspread.authorize(scoped_credentials)
         sheet = gc.open_by_key(GOOGLE_SHEET_ID)
         worksheet = sheet.get_worksheet(0)
 
