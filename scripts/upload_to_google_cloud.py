@@ -88,20 +88,26 @@ def upload_to_google_sheets(credentials):
         wb = openpyxl.load_workbook(EXCEL_FILE)
         ws = wb.active
 
-        # Get all rows from Excel
+        # Get all rows from Excel (exactly 25 columns: A-Y)
         excel_data = []
-        for row in ws.iter_rows(min_row=1, values_only=True):
-            excel_data.append(list(row))
+        for row_idx, row in enumerate(ws.iter_rows(min_row=1, values_only=True), 1):
+            # Convert to list and trim to exactly 25 columns (A-Y)
+            row_list = list(row)[:25]
+            # Pad with None if less than 25 columns
+            while len(row_list) < 25:
+                row_list.append(None)
+            excel_data.append(row_list)
 
         # Get existing data from Google Sheet
         existing_data = worksheet.get_all_values()
 
         logger.info(f"Syncing data to Google Sheet (ID: {GOOGLE_SHEET_ID})")
 
-        # If sheet is empty, add headers
-        if not existing_data:
-            logger.info("Sheet is empty, adding all data with headers")
-            worksheet.update(excel_data)
+        # If sheet is empty or has wrong data, clear and rewrite all
+        if not existing_data or len(existing_data[0]) != 25:
+            logger.info("Clearing sheet and uploading all data with correct columns")
+            worksheet.clear()
+            worksheet.update(excel_data, raw=False)
             logger.info(f"✓ Successfully synced {len(excel_data)} rows to Google Sheets")
         else:
             # Find new rows to append (skip header row which is row 1)
@@ -113,7 +119,7 @@ def upload_to_google_sheets(credentials):
                 rows_to_append = new_rows[existing_count:]
                 if rows_to_append:
                     logger.info(f"Appending {len(rows_to_append)} new row(s)")
-                    worksheet.append_rows(rows_to_append)
+                    worksheet.append_rows(rows_to_append, table_range=f"A{len(existing_data)+1}")
                     logger.info(f"✓ Successfully appended {len(rows_to_append)} new row(s) to Google Sheets")
                 else:
                     logger.info("No new rows to append")
