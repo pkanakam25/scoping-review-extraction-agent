@@ -25,9 +25,10 @@ jobs:
         run: |
           pip install -r requirements.txt
 
-      - name: Download PDFs from OneDrive
+      - name: Download PDFs from Google Drive
         env:
-          ONEDRIVE_FOLDER_URL: ${{ secrets.ONEDRIVE_FOLDER_URL }}
+          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+          GOOGLE_CLOUD_CREDENTIALS: ${{ secrets.GOOGLE_CLOUD_CREDENTIALS }}
         run: |
           python scripts/download_from_onedrive.py
 
